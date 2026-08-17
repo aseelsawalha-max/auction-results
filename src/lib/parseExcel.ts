@@ -1,4 +1,4 @@
-import ExcelJS from 'exceljs';
+import * as XLSX from 'xlsx';
 import { detectColumns } from './columnMapping';
 import type { CanonicalField } from './types';
 
@@ -14,42 +14,40 @@ export interface ParsedWorkbook {
   unmappedColumns: string[];
 }
 
-function cellToString(value: ExcelJS.CellValue): string {
+function cellToString(value: unknown): string {
   if (value === null || value === undefined) return '';
   if (value instanceof Date) return value.toISOString();
-  if (typeof value === 'object') {
-    // Rich text / formula / hyperlink cells
-    const v = value as { text?: string; result?: unknown; richText?: { text: string }[] };
-    if (v.richText) return v.richText.map((r) => r.text).join('');
-    if (typeof v.text === 'string') return v.text;
-    if (v.result !== undefined) return String(v.result);
-    return '';
-  }
+  if (typeof value === 'number') return String(value);
   return String(value).trim();
 }
 
 /**
  * Parses the first worksheet that looks like a LockerFox auction-results export
  * (i.e. contains a header row with at least Facility/Unit/Status-like columns).
- * Falls back to the first worksheet with any data.
+ * Handles both legacy .xls (BIFF) and modern .xlsx (OOXML) exports transparently.
  */
 export async function parseExcelFile(file: File): Promise<ParsedWorkbook> {
   const buffer = await file.arrayBuffer();
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
 
   let best: { headers: string[]; rows: ParsedRow[]; score: number } | null = null;
 
-  for (const worksheet of workbook.worksheets) {
-    if (worksheet.rowCount === 0) continue;
+  for (const sheetName of workbook.SheetNames) {
+    const worksheet = workbook.Sheets[sheetName];
+    if (!worksheet['!ref']) continue;
 
-    const headerRowNumber = findHeaderRow(worksheet);
-    if (headerRowNumber === null) continue;
+    // header:1 => array-of-arrays; raw:true (default) + cellDates:true keeps Date objects
+    // and numbers intact so we control text conversion ourselves.
+    const grid: unknown[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+    if (grid.length === 0) continue;
 
-    const headerRow = worksheet.getRow(headerRowNumber);
+    const headerRowIndex = findHeaderRowIndex(grid);
+    if (headerRowIndex === null) continue;
+
+    const headerRowRaw = grid[headerRowIndex];
     const headers: string[] = [];
-    headerRow.eachCell({ includeEmpty: false }, (cell) => {
-      const text = cellToString(cell.value);
+    headerRowRaw.forEach((cell) => {
+      const text = cellToString(cell);
       if (text) headers.push(text);
     });
     if (headers.length === 0) continue;
@@ -58,18 +56,16 @@ export async function parseExcelFile(file: File): Promise<ParsedWorkbook> {
     const score = Object.keys(mapping).length;
 
     const rows: ParsedRow[] = [];
-    for (let r = headerRowNumber + 1; r <= worksheet.rowCount; r++) {
-      const row = worksheet.getRow(r);
-      if (row.cellCount === 0) continue;
+    for (let r = headerRowIndex + 1; r < grid.length; r++) {
+      const rowRaw = grid[r] ?? [];
       const values: Record<string, string> = {};
       let hasAny = false;
       headers.forEach((header, idx) => {
-        const cell = row.getCell(idx + 1);
-        const text = cellToString(cell.value);
+        const text = cellToString(rowRaw[idx]);
         values[header] = text;
         if (text) hasAny = true;
       });
-      if (hasAny) rows.push({ rowNumber: r, values });
+      if (hasAny) rows.push({ rowNumber: r + 1, values }); // +1: 1-based, matches spreadsheet row incl. header
     }
 
     if (!best || score > best.score) {
@@ -94,16 +90,15 @@ export async function parseExcelFile(file: File): Promise<ParsedWorkbook> {
 }
 
 /** Scans the first 10 rows for the one most likely to be a header row. */
-function findHeaderRow(worksheet: ExcelJS.Worksheet): number | null {
-  const maxScan = Math.min(10, worksheet.rowCount);
+function findHeaderRowIndex(grid: unknown[][]): number | null {
+  const maxScan = Math.min(10, grid.length);
   let bestRow: number | null = null;
   let bestScore = 0;
 
-  for (let r = 1; r <= maxScan; r++) {
-    const row = worksheet.getRow(r);
+  for (let r = 0; r < maxScan; r++) {
     const headers: string[] = [];
-    row.eachCell({ includeEmpty: false }, (cell) => {
-      const text = cellToString(cell.value);
+    (grid[r] ?? []).forEach((cell) => {
+      const text = cellToString(cell);
       if (text) headers.push(text);
     });
     if (headers.length < 2) continue;

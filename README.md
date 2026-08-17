@@ -8,9 +8,10 @@ final outcome?**
 
 ## What it does
 
-- **Upload any LockerFox auction-results Excel export** (`.xlsx`/`.xls`).
-  The filename doesn't matter — columns are detected by header text, not by
-  file name or column position.
+- **Upload any LockerFox auction-results Excel export** — both the legacy
+  binary `.xls` format (what LockerFox actually produces) and `.xlsx` are
+  supported. The filename doesn't matter — columns are detected by header
+  text, not by file name or column position.
 - **Merges into history automatically.** Re-uploading a later export updates
   existing auctions in place (e.g. `UNSOLD` → `SOLD`) instead of creating
   duplicates, and preserves every auction that isn't in the newest file.
@@ -81,6 +82,19 @@ whichever browser/device processes the uploads. This means:
   everyone else. That backend is a natural next step if shared multi-device
   access turns out to be required — the parsing/merge/validation logic in
   `src/lib` is UI-agnostic and would move over directly.
+
+## A note on the Excel-parsing dependency
+
+Parsing uses [SheetJS (`xlsx`)](https://www.npmjs.com/package/xlsx), the only
+well-maintained library that reads both legacy `.xls` (BIFF/OLE) and modern
+`.xlsx` files in the browser — needed because real LockerFox exports come as
+`.xls`, not `.xlsx`. `npm audit` flags this package for a prototype-pollution
+and a ReDoS advisory with no fix currently published upstream. Both are
+triggered only by parsing a maliciously crafted file; since every file this
+app parses is a LockerFox export you provide yourself, this is an accepted,
+low-risk tradeoff for an internal tool rather than something exploitable by
+outside input. Revisit this if the upload path is ever opened to untrusted
+users.
 
 ## Project structure
 

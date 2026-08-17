@@ -4,8 +4,14 @@ import { mergeUpload } from '../merge';
 import type { Dataset } from '../types';
 import { buildXlsxFile } from './testHelpers';
 
-async function upload(dataset: Dataset, fileName: string, rows: Record<string, string | number>[], now: string) {
-  const file = await buildXlsxFile(fileName, rows);
+async function upload(
+  dataset: Dataset,
+  fileName: string,
+  rows: Record<string, string | number | Date>[],
+  now: string,
+  bookType: 'xlsx' | 'biff8' = 'xlsx',
+) {
+  const file = buildXlsxFile(fileName, rows, bookType);
   const parsed = await parseExcelFile(file);
   return mergeUpload(dataset, fileName, parsed.rows, parsed.mapping, parsed.unmappedColumns, now);
 }
@@ -94,6 +100,28 @@ describe('LockerFox export merge/dedup', () => {
     expect(second.dataset.records[0].dedupeKeyIsNativeId).toBe(true);
     expect(second.dataset.records[0].status).toBe('SOLD');
     expect(second.dataset.records[0].facility).toBe('XYZ Storage LLC');
+  });
+
+  it('reads legacy .xls (BIFF8) exports the same as .xlsx, including real-world column sets with no Winner column', async () => {
+    const empty: Dataset = { records: [], uploads: [] };
+    const closeDate = new Date(Date.UTC(2026, 6, 31, 10, 0, 0));
+    const { dataset, result } = await upload(
+      empty,
+      'LockerfoxEndedAsOf_20260817_162238UTC.xls',
+      [
+        { 'Auction Close': closeDate, Facility: 'Ontario Mini Storage', Unit: '29', Status: 'CANCELLED', Attendees: 14, Views: 26, Bid: 20, 'Cancel Reason Code': 'TENANT_PAID' },
+        { 'Auction Close': closeDate, Facility: 'Fast & EZ Self Storage - Chandler', Unit: '121', Status: 'SOLD', Attendees: 17, Views: 26, Bid: 20 },
+      ],
+      '2026-08-17T16:22:38.000Z',
+      'biff8',
+    );
+
+    expect(result.recordsAdded).toBe(2);
+    expect(result.warnings.some((w) => w.severity === 'error')).toBe(false);
+    const sold = dataset.records.find((r) => r.unit === '121');
+    expect(sold?.status).toBe('SOLD');
+    expect(sold?.bid).toBe(20);
+    expect(sold?.winner).toBeUndefined(); // this export has no Winner column at all
   });
 
   it('preserves unrecognized columns as extra fields for future-compatibility', async () => {

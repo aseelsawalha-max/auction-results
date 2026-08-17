@@ -57,7 +57,7 @@ export function UploadPanel() {
         <div className="upload-dropzone__icon">📂</div>
         <div className="upload-dropzone__text">
           <strong>{busy ? 'Processing…' : 'Drop the latest LockerFox export here'}</strong>
-          <span>or click to browse — any .xlsx filename works</span>
+          <span>or click to browse — .xlsx or .xls, any filename works</span>
         </div>
       </div>
 

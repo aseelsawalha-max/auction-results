@@ -12,9 +12,9 @@
   },
   "dependencies": {
     "date-fns": "^4.4.0",
-    "exceljs": "^4.4.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

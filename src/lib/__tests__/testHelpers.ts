@@ -1,22 +1,26 @@
-import ExcelJS from 'exceljs';
+import * as XLSX from 'xlsx';
 
-/** Builds an in-memory .xlsx File from an array of row objects (header: value). */
-export async function buildXlsxFile(fileName: string, rows: Record<string, string | number>[]): Promise<File> {
-  const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet('Auction Results');
+/** Builds an in-memory .xlsx or .xls File from an array of row objects (header: value). */
+export function buildXlsxFile(
+  fileName: string,
+  rows: Record<string, string | number | Date>[],
+  bookType: 'xlsx' | 'biff8' = 'xlsx',
+): File {
+  const headers = Array.from(
+    rows.reduce((set, row) => {
+      Object.keys(row).forEach((k) => set.add(k));
+      return set;
+    }, new Set<string>()),
+  );
 
-  const headers = Array.from(rows.reduce((set, row) => {
-    Object.keys(row).forEach((k) => set.add(k));
-    return set;
-  }, new Set<string>()));
+  const worksheet = XLSX.utils.json_to_sheet(rows, { header: headers });
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Results');
 
-  sheet.addRow(headers);
-  for (const row of rows) {
-    sheet.addRow(headers.map((h) => row[h] ?? ''));
-  }
-
-  const buffer = await workbook.xlsx.writeBuffer();
-  return new File([buffer as unknown as BlobPart], fileName, {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  });
+  const buffer = XLSX.write(workbook, { type: 'array', bookType });
+  const mime =
+    bookType === 'biff8'
+      ? 'application/vnd.ms-excel'
+      : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  return new File([buffer], fileName, { type: mime });
 }
