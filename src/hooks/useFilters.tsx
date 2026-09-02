@@ -27,8 +27,11 @@ export function FiltersProvider({ children }: { children: ReactNode }) {
     if (latest) {
       setFilters((prev) => ({
         ...prev,
-        year: String(latest.getFullYear()),
-        month: String(latest.getMonth() + 1).padStart(2, '0'),
+        // getUTC* to match recordDate()/latestAuctionDate(), which anchor
+        // Auction Close as UTC — avoids defaulting to the wrong month near a
+        // month boundary depending on the viewer's timezone.
+        year: String(latest.getUTCFullYear()),
+        month: String(latest.getUTCMonth() + 1).padStart(2, '0'),
       }));
     }
   }, [dataset.records]);

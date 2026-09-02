@@ -1,4 +1,5 @@
 import type { AuctionRecord } from './types';
+import { auctionCloseDate } from './auctionCloseDisplay';
 
 export interface Filters {
   facility: string; // '' = all
@@ -10,10 +11,15 @@ export interface Filters {
 
 export const EMPTY_FILTERS: Filters = { facility: '', year: '', month: '', status: '', unitSearch: '' };
 
+/**
+ * The Date to filter/sort/group by. Uses auctionCloseDate() (prefers
+ * auctionCloseRaw, anchors naive date/time as UTC) rather than a plain
+ * `new Date(record.auctionClose)` so an auction close near a month boundary
+ * isn't bucketed into the wrong month depending on the viewer's timezone —
+ * always read with the UTC accessors (getUTCFullYear/getUTCMonth/etc.).
+ */
 export function recordDate(record: AuctionRecord): Date | undefined {
-  if (!record.auctionClose) return undefined;
-  const d = new Date(record.auctionClose);
-  return isNaN(d.getTime()) ? undefined : d;
+  return auctionCloseDate(record);
 }
 
 export function applyFilters(records: AuctionRecord[], filters: Filters): AuctionRecord[] {
@@ -23,8 +29,8 @@ export function applyFilters(records: AuctionRecord[], filters: Filters): Auctio
     if (filters.year || filters.month) {
       const d = recordDate(r);
       if (!d) return false;
-      if (filters.year && String(d.getFullYear()) !== filters.year) return false;
-      if (filters.month && String(d.getMonth() + 1).padStart(2, '0') !== filters.month) return false;
+      if (filters.year && String(d.getUTCFullYear()) !== filters.year) return false;
+      if (filters.month && String(d.getUTCMonth() + 1).padStart(2, '0') !== filters.month) return false;
     }
 
     if (filters.status && (r.status ?? '').toLowerCase() !== filters.status.toLowerCase()) return false;
@@ -50,7 +56,7 @@ export function distinctYears(records: AuctionRecord[]): string[] {
   const years = new Set<string>();
   for (const r of records) {
     const d = recordDate(r);
-    if (d) years.add(String(d.getFullYear()));
+    if (d) years.add(String(d.getUTCFullYear()));
   }
   return Array.from(years).sort((a, b) => Number(b) - Number(a));
 }

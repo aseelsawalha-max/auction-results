@@ -1,11 +1,25 @@
 import type { AuctionRecord } from '../lib/types';
 import { StatusBadge } from './ResultsTable';
+import { formatAuctionCloseDateTime, formatAuctionCloseHistoryValue } from '../lib/auctionCloseDisplay';
 
+// For system-generated timestamps (when an admin uploaded a file, etc.) —
+// these are genuinely local-time-relevant ("uploaded 3pm my time"), unlike
+// the LockerFox Auction Close value, which uses formatAuctionCloseDateTime()
+// below instead so it displays identically for every viewer.
 function formatDateTime(iso: string | undefined): string {
   if (!iso) return '—';
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '—';
   return d.toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+// auctionCloseRaw/auctionClose history entries store the original stringified
+// value verbatim (by design, for an accurate audit trail) — reformat just
+// those two fields for human-readable display without touching the stored data.
+function formatHistoryValue(field: string, value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (field === 'auctionCloseRaw' || field === 'auctionClose') return formatAuctionCloseHistoryValue(value);
+  return value;
 }
 
 function Field({ label, value }: { label: string; value: string | number | undefined }) {
@@ -35,7 +49,7 @@ export function AuctionDetail({ record, onClose }: { record: AuctionRecord; onCl
         <div className="detail-grid">
           <Field label="Facility" value={record.facility} />
           <Field label="Unit" value={record.unit} />
-          <Field label="Auction Close" value={record.auctionClose ? formatDateTime(record.auctionClose) : record.auctionCloseRaw} />
+          <Field label="Auction Close" value={formatAuctionCloseDateTime(record)} />
           <Field label="Status" value={record.status} />
           <Field label="Winning Bid" value={record.bid !== undefined ? record.bid.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : undefined} />
           <Field label="Winner" value={record.winner} />
@@ -73,7 +87,7 @@ export function AuctionDetail({ record, onClose }: { record: AuctionRecord; onCl
                 <ul>
                   {h.changedFields.map((c, j) => (
                     <li key={j}>
-                      {c.field}: {c.from ?? '(none)'} → <strong>{c.to}</strong>
+                      {c.field}: {formatHistoryValue(c.field, c.from) ?? '(none)'} → <strong>{formatHistoryValue(c.field, c.to)}</strong>
                     </li>
                   ))}
                 </ul>

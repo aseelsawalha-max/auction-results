@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { AuctionRecord } from '../lib/types';
+import { auctionCloseDate, formatAuctionCloseDate } from '../lib/auctionCloseDisplay';
 
 type SortKey = 'auctionClose' | 'facility' | 'unit' | 'status' | 'bid' | 'winner' | 'attendees' | 'views';
 
@@ -13,13 +14,6 @@ const COLUMNS: { key: SortKey; label: string; align?: 'right' }[] = [
   { key: 'attendees', label: 'Attendees', align: 'right' },
   { key: 'views', label: 'Views', align: 'right' },
 ];
-
-function formatDate(iso: string | undefined): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-}
 
 function formatBid(bid: number | undefined): string {
   if (bid === undefined) return '—';
@@ -58,7 +52,13 @@ export function ResultsTable({
       if (sortKey === 'bid' || sortKey === 'attendees' || sortKey === 'views') {
         cmp = (a[sortKey] ?? -Infinity) - (b[sortKey] ?? -Infinity);
       } else if (sortKey === 'auctionClose') {
-        cmp = (a.auctionClose ?? '').localeCompare(b.auctionClose ?? '');
+        // Compare as actual instants (not the raw stored strings) so records
+        // stay correctly ordered even when some have round-tripped through
+        // Supabase's DATE column (bare "YYYY-MM-DD") and others haven't yet
+        // (full ISO timestamp) — the two string forms don't sort consistently.
+        const da = auctionCloseDate(a)?.getTime() ?? -Infinity;
+        const db = auctionCloseDate(b)?.getTime() ?? -Infinity;
+        cmp = da - db;
       } else {
         cmp = (a[sortKey] ?? '').toString().localeCompare((b[sortKey] ?? '').toString());
       }
@@ -108,7 +108,7 @@ export function ResultsTable({
           <tbody>
             {sorted.map((r) => (
               <tr key={r.dedupeKey} onClick={() => onSelect(r)} className="results-table__row">
-                <td>{formatDate(r.auctionClose) === '—' && r.auctionCloseRaw ? r.auctionCloseRaw : formatDate(r.auctionClose)}</td>
+                <td>{formatAuctionCloseDate(r)}</td>
                 <td>{r.facility ?? '—'}</td>
                 <td className="results-table__unit-cell">{r.unit ?? '—'}</td>
                 <td><StatusBadge status={r.status} /></td>
