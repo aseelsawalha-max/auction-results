@@ -1,4 +1,5 @@
 import { useDataset } from '../hooks/useDataset';
+import { useAuth } from '../hooks/useAuth';
 import { UploadPanel } from '../components/UploadPanel';
 
 function formatDateTime(iso: string | undefined): string {
@@ -8,13 +9,22 @@ function formatDateTime(iso: string | undefined): string {
   return d.toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-export function SystemStatus() {
-  const { dataset, resetDataset } = useDataset();
+export function AdminDashboard() {
+  const { dataset, error } = useDataset();
+  const { session, signOut } = useAuth();
   const lastUpload = dataset.uploads[0];
 
   return (
     <div className="page">
-      <h1>Data Refresh / System Status</h1>
+      <div className="admin-header">
+        <h1>Admin — Data Upload &amp; System Status</h1>
+        <div className="admin-header__session">
+          <span className="text-muted">Signed in as {session?.user.email}</span>
+          <button type="button" className="button" onClick={() => signOut()}>Sign Out</button>
+        </div>
+      </div>
+
+      {error && <div className="banner banner--error">{error}</div>}
 
       <div className="status-summary">
         <div className="status-summary__item">
@@ -28,6 +38,10 @@ export function SystemStatus() {
         <div className="status-summary__item">
           <div className="status-summary__label">Records Updated (last upload)</div>
           <div className="status-summary__value">{lastUpload?.recordsUpdated ?? 0}</div>
+        </div>
+        <div className="status-summary__item">
+          <div className="status-summary__label">Records Unchanged (last upload)</div>
+          <div className="status-summary__value">{lastUpload?.recordsUnchanged ?? 0}</div>
         </div>
         <div className="status-summary__item">
           <div className="status-summary__label">Total Historical Records</div>
@@ -70,22 +84,6 @@ export function SystemStatus() {
           ))}
         </div>
       )}
-
-      <details className="danger-zone">
-        <summary>Advanced</summary>
-        <p className="text-muted">This clears all locally stored auction history from this browser. Use only if you need to start over.</p>
-        <button
-          type="button"
-          className="button button--danger"
-          onClick={() => {
-            if (confirm('This will permanently delete all locally stored auction history. Continue?')) {
-              resetDataset();
-            }
-          }}
-        >
-          Reset all data
-        </button>
-      </details>
     </div>
   );
 }

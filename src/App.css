@@ -510,16 +510,6 @@
   font-size: 12px;
 }
 
-.danger-zone {
-  margin-top: 28px;
-  font-size: 13px;
-}
-
-.danger-zone summary {
-  cursor: pointer;
-  color: var(--text-muted);
-}
-
 .button {
   border-radius: 6px;
   padding: 8px 14px;
@@ -532,6 +522,51 @@
   color: var(--danger);
   border-color: #f0c7c3;
   margin-top: 8px;
+}
+
+.button--primary {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+/* Admin */
+.admin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.admin-header__session {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.admin-login {
+  max-width: 360px;
+}
+
+.admin-login__form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.admin-login__form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.admin-login__form input {
+  width: 100%;
 }
 
 @media (max-width: 640px) {

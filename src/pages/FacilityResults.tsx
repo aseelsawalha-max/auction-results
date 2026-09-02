@@ -8,7 +8,7 @@ import { AuctionDetail } from '../components/AuctionDetail';
 import type { AuctionRecord } from '../lib/types';
 
 export function FacilityResults() {
-  const { dataset } = useDataset();
+  const { dataset, loading, error } = useDataset();
   const { filters } = useFilters();
   const [selected, setSelected] = useState<AuctionRecord | null>(null);
   const [tableSearch, setTableSearch] = useState('');
@@ -19,10 +19,13 @@ export function FacilityResults() {
     <div className="page">
       <h1>Facility Results</h1>
       <p className="text-muted">Select a facility and time period to see every unit that went to auction and its final outcome.</p>
+      {error && <div className="banner banner--error">{error}</div>}
       <FiltersBar />
-      {dataset.records.length === 0 ? (
-        <p className="text-muted">No auction data yet. Upload a LockerFox export from the Overview page.</p>
-      ) : (
+      {loading && <p className="text-muted">Loading auction data…</p>}
+      {!loading && dataset.records.length === 0 && (
+        <p className="text-muted">No auction data yet. Ask an administrator to upload a LockerFox export.</p>
+      )}
+      {!loading && dataset.records.length > 0 && (
         <ResultsTable
           records={filtered}
           onSelect={setSelected}

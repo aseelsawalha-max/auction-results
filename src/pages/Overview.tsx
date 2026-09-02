@@ -4,10 +4,9 @@ import { applyFilters } from '../lib/filters';
 import { FiltersBar } from '../components/FiltersBar';
 import { KpiCards } from '../components/KpiCards';
 import { StatusChart } from '../components/StatusChart';
-import { UploadPanel } from '../components/UploadPanel';
 
 export function Overview() {
-  const { dataset } = useDataset();
+  const { dataset, loading, error } = useDataset();
   const { filters } = useFilters();
   const hasData = dataset.records.length > 0;
   const filtered = applyFilters(dataset.records, filters);
@@ -15,17 +14,20 @@ export function Overview() {
   return (
     <div className="page">
       <h1>Overview</h1>
-      {!hasData && (
-        <p className="text-muted">No auction data yet. Upload the latest LockerFox export to get started.</p>
+      {error && <div className="banner banner--error">{error}</div>}
+      {loading && <p className="text-muted">Loading auction data…</p>}
+      {!loading && !hasData && !error && (
+        <p className="text-muted">
+          No auction data yet. Ask an administrator to upload the latest LockerFox export.
+        </p>
       )}
-      {hasData && (
+      {!loading && hasData && (
         <>
           <FiltersBar />
           <KpiCards records={filtered} />
           <StatusChart records={filtered} />
         </>
       )}
-      <UploadPanel />
     </div>
   );
 }
