@@ -3,6 +3,28 @@ import { parseExcelFile } from '../parseExcel';
 import { mergeUpload } from '../merge';
 import type { Dataset } from '../types';
 import { buildXlsxFile } from './testHelpers';
+import { recordToRow, rowToRecord } from '../remoteStore';
+
+/**
+ * Simulates a record having been persisted to and re-fetched from Supabase.
+ * `auction_close` is stored as a DATE column (see supabase/migrations), which
+ * silently drops any time-of-day component — a full ISO timestamp like
+ * "2026-07-31T20:00:00.000Z" comes back as plain "2026-07-31". recordToRow/
+ * rowToRecord alone don't reproduce that (they're just field renaming), so
+ * this helper truncates auction_close the same way Postgres's DATE type does.
+ */
+function simulateDbRoundTrip(dataset: Dataset): Dataset {
+  return {
+    records: dataset.records.map((r) => {
+      const row = recordToRow(r);
+      return rowToRecord({
+        ...row,
+        auction_close: row.auction_close ? row.auction_close.slice(0, 10) : row.auction_close,
+      });
+    }),
+    uploads: dataset.uploads,
+  };
+}
 
 async function upload(
   dataset: Dataset,
@@ -78,6 +100,73 @@ describe('LockerFox export merge/dedup', () => {
     expect(second.result.recordsAdded).toBe(0);
     expect(second.result.recordsUpdated).toBe(0);
     expect(second.result.recordsUnchanged).toBe(1);
+  });
+
+  it('re-uploading an identical file after a real Supabase round-trip does not mark every record updated', async () => {
+    // Regression test for a real production incident: uploading the same
+    // LockerFox export twice reported "0 added, 487 updated, 0 unchanged"
+    // instead of "0 added, 0 updated, 487 unchanged". Root cause: auction_close
+    // is stored as a DATE column, so a value read back from Supabase has no
+    // time-of-day component, while parseDateFlexible() always produces a full
+    // ISO timestamp on every fresh parse. Comparing those two representations
+    // directly made every record with a parseable date look "changed" on the
+    // second and every subsequent upload of the same file, even though
+    // nothing about the auction had changed.
+    const rows = [
+      { 'Auction Close': '7/31/2026', Facility: 'LOGO Storage Burnet', Unit: 'H19', Status: 'SOLD', Bid: 10, Winner: 'Jennifer Lopez', Attendees: 4, Views: 22 },
+      { 'Auction Close': '7/31/2026', Facility: 'LOGO Storage Burnet', Unit: 'F18', Status: 'PICKED-UP', Bid: 20, Winner: 'Steve Smith', Attendees: 3, Views: 15 },
+      { 'Auction Close': '8/1/2026', Facility: 'LOGO Storage Burnet', Unit: 'A001', Status: 'UNSOLD', Bid: 0, Winner: '', Attendees: 1, Views: 5 },
+    ];
+    const empty: Dataset = { records: [], uploads: [] };
+    const first = await upload(empty, 'export1.xlsx', rows, '2026-07-31T20:00:00.000Z');
+    expect(first.result.recordsAdded).toBe(3);
+
+    const persistedAndRefetched = simulateDbRoundTrip(first.dataset);
+
+    const second = await upload(persistedAndRefetched, 'export2_identical.xlsx', rows, '2026-08-01T09:00:00.000Z');
+
+    expect(second.dataset.records).toHaveLength(3);
+    expect(second.result.recordsAdded).toBe(0);
+    expect(second.result.recordsUpdated).toBe(0);
+    expect(second.result.recordsUnchanged).toBe(3);
+
+    // auctionClose itself must still be kept in sync (not frozen/stale) even
+    // though it's excluded from change detection.
+    for (const r of second.dataset.records) {
+      expect(r.auctionClose).toBeDefined();
+    }
+  });
+
+  it('still detects a genuine auction-close date change even though the derived field is excluded from comparison', async () => {
+    // Uses a native Auction ID so the dedupe key stays stable across the date
+    // change — with the default composite key (facility+unit+auction close),
+    // changing the close date changes the key itself and this would
+    // legitimately look like a different auction, which is a separate,
+    // pre-existing concern unrelated to this fix.
+    const empty: Dataset = { records: [], uploads: [] };
+    const first = await upload(
+      empty,
+      'export1.xlsx',
+      [{ 'Auction ID': 'LF-5001', 'Auction Close': '7/31/2026', Facility: 'ABC Storage', Unit: 'Z1', Status: 'UNSOLD' }],
+      '2026-07-31T20:00:00.000Z',
+    );
+    const persistedAndRefetched = simulateDbRoundTrip(first.dataset);
+
+    // Auction got rescheduled/relisted to a later date.
+    const second = await upload(
+      persistedAndRefetched,
+      'export2.xlsx',
+      [{ 'Auction ID': 'LF-5001', 'Auction Close': '8/15/2026', Facility: 'ABC Storage', Unit: 'Z1', Status: 'UNSOLD' }],
+      '2026-08-01T09:00:00.000Z',
+    );
+
+    expect(second.result.recordsUpdated).toBe(1);
+    const record = second.dataset.records[0];
+    expect(record.auctionCloseRaw).toBe('8/15/2026');
+    expect(record.auctionClose?.startsWith('2026-08-15')).toBe(true);
+    expect(
+      record.history[1].changedFields.some((c) => c.field === 'auctionCloseRaw' && c.to === '8/15/2026'),
+    ).toBe(true);
   });
 
   it('prefers a native auction ID for dedup over facility/unit/date when present', async () => {

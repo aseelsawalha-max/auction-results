@@ -140,8 +140,10 @@ export function mergeUpload(
       recordsAdded++;
     } else {
       const changedFields: { field: string; from: string | undefined; to: string | undefined }[] = [];
+      // Note: 'auctionClose' (the parsed/derived date) is deliberately excluded here —
+      // see the comment below where it's refreshed separately.
       const comparableFields = [
-        'auctionId', 'auctionClose', 'auctionCloseRaw', 'facility', 'unit', 'status',
+        'auctionId', 'auctionCloseRaw', 'facility', 'unit', 'status',
         'attendees', 'views', 'bid', 'winner', 'voidReasonCode', 'cancelReasonCode',
       ] as const;
 
@@ -154,6 +156,23 @@ export function mergeUpload(
           changedFields.push({ field, from: oldVal === undefined ? undefined : String(oldVal), to: String(newVal) });
           (existing as unknown as Record<string, unknown>)[field] = newVal;
         }
+      }
+
+      // 'auctionClose' is a value parsed/derived from 'auctionCloseRaw', re-parsed fresh
+      // on every upload. It's kept in sync here unconditionally rather than through the
+      // comparableFields loop above because it is not itself an independent business
+      // fact — 'auctionCloseRaw' (compared above) is. Comparing the derived value
+      // directly is unreliable once it round-trips through the database: this app's
+      // schema stores auction_close as a DATE column, so a value read back from
+      // Supabase has no time-of-day component, while a value freshly computed by
+      // parseDateFlexible() is a full ISO timestamp. Re-uploading the exact same
+      // unchanged file would then make every record with a parseable date look
+      // "changed" on the second and every later upload, even though nothing about
+      // the auction actually changed. Refreshing the field without treating a mere
+      // representation mismatch as a change avoids that false positive while still
+      // keeping 'auctionClose' from ever going stale relative to 'auctionCloseRaw'.
+      if (candidateFields.auctionClose !== undefined) {
+        existing.auctionClose = candidateFields.auctionClose;
       }
 
       for (const [k, v] of Object.entries(extra)) {
