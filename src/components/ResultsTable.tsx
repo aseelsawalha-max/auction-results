@@ -122,7 +122,10 @@ export function ResultsTable({
             ))}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={10} className="text-muted text-center">No units match the current filters.</td>
+                <td colSpan={10} className="results-empty-state">
+                  <div className="results-empty-state__title">No auction results found for these filters.</div>
+                  <div className="text-muted">Try a different facility, month, or status — or clear filters to see everything.</div>
+                </td>
               </tr>
             )}
           </tbody>

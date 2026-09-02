@@ -202,6 +202,32 @@
   color: var(--danger);
 }
 
+/* Facility-first emphasis on the Facility Results filter bar */
+.filters-bar__field--facility {
+  min-width: 220px;
+}
+
+.filters-bar__field--facility label {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 11px;
+}
+
+.filters-bar__field--facility select {
+  font-size: 15px;
+  font-weight: 600;
+  padding: 9px 12px;
+  border-color: var(--accent);
+}
+
+/* Result count headline above the Facility Results table */
+.results-summary {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-h);
+  margin: 4px 0 12px;
+}
+
 /* Results table */
 .results-table-wrap {
   background: var(--surface);
@@ -248,7 +274,7 @@
 }
 
 .results-table td {
-  padding: 10px 14px;
+  padding: 11px 14px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -258,6 +284,20 @@
 
 .results-table__row:hover {
   background: var(--accent-bg);
+}
+
+.results-table td.results-empty-state {
+  padding: 40px 20px;
+  text-align: center;
+  white-space: normal;
+  cursor: default;
+}
+
+.results-empty-state__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-h);
+  margin-bottom: 4px;
 }
 
 /* Status badges */
@@ -585,7 +625,8 @@
     align-items: stretch;
   }
   .filters-bar__field,
-  .filters-bar__field--grow {
+  .filters-bar__field--grow,
+  .filters-bar__field--facility {
     min-width: 0;
     flex: none;
   }
