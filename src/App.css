@@ -252,6 +252,27 @@
 
 .results-table-scroll {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* A visible (not just native-default) horizontal scrollbar makes it obvious
+   there are more columns to the right — several browsers hide the native one
+   until hover/scroll, which reads as "no more content" on a laptop trackpad. */
+.results-table-scroll::-webkit-scrollbar {
+  height: 10px;
+}
+
+.results-table-scroll::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+.results-table-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 5px;
+}
+
+.results-table-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
 }
 
 .results-table {
@@ -261,7 +282,7 @@
 
 .results-table th {
   text-align: left;
-  padding: 10px 14px;
+  padding: 12px 14px;
   color: var(--text-muted);
   font-weight: 600;
   font-size: 11px;
@@ -274,7 +295,7 @@
 }
 
 .results-table td {
-  padding: 11px 14px;
+  padding: 13px 14px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -284,6 +305,13 @@
 
 .results-table__row:hover {
   background: var(--accent-bg);
+}
+
+/* Unit is what a Site Manager searches for most — a small, non-loud way to
+   make it stand out among the other identifying columns. */
+.results-table__unit-cell {
+  font-weight: 600;
+  color: var(--text-h);
 }
 
 .results-table td.results-empty-state {

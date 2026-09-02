@@ -110,7 +110,7 @@ export function ResultsTable({
               <tr key={r.dedupeKey} onClick={() => onSelect(r)} className="results-table__row">
                 <td>{formatDate(r.auctionClose) === '—' && r.auctionCloseRaw ? r.auctionCloseRaw : formatDate(r.auctionClose)}</td>
                 <td>{r.facility ?? '—'}</td>
-                <td>{r.unit ?? '—'}</td>
+                <td className="results-table__unit-cell">{r.unit ?? '—'}</td>
                 <td><StatusBadge status={r.status} /></td>
                 <td className="text-right">{formatBid(r.bid)}</td>
                 <td>{r.winner ?? '—'}</td>
