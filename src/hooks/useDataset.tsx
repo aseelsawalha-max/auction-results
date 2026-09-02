@@ -20,6 +20,7 @@ const DatasetContext = createContext<DatasetContextValue | null>(null);
 
 export function DatasetProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth();
+  const userId = session?.user.id;
   const [dataset, setDataset] = useState<Dataset>(EMPTY_DATASET);
   const [loading, setLoading] = useState(isSupabaseConfigured);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +46,19 @@ export function DatasetProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
+
+    // auction_records/uploads require an authenticated session to read (see
+    // supabase/migrations/0001_init.sql) — anon requests are rejected by the
+    // database, so don't even try until someone is signed in. Signing out
+    // clears the locally held dataset rather than leaving stale data visible.
+    if (!userId) {
+      setDataset(EMPTY_DATASET);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
     load();
 
     // Auto-refresh every viewer's dashboard the moment an admin upload changes
@@ -59,7 +73,7 @@ export function DatasetProvider({ children }: { children: ReactNode }) {
       client.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [userId]);
 
   const value = useMemo<DatasetContextValue>(
     () => ({

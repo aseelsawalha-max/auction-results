@@ -41,6 +41,13 @@
   flex-wrap: wrap;
 }
 
+.topbar__session {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
 .topbar__nav button {
   border: 1px solid transparent;
   background: transparent;
@@ -546,18 +553,18 @@
   font-size: 13px;
 }
 
-.admin-login {
+.auth-page {
   max-width: 360px;
 }
 
-.admin-login__form {
+.auth-page__form {
   display: flex;
   flex-direction: column;
   gap: 14px;
   margin-top: 16px;
 }
 
-.admin-login__form label {
+.auth-page__form label {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -565,7 +572,7 @@
   color: var(--text-muted);
 }
 
-.admin-login__form input {
+.auth-page__form input {
   width: 100%;
 }
 

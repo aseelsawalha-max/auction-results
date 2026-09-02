@@ -5,6 +5,7 @@ import { Overview } from './pages/Overview';
 import { FacilityResults } from './pages/FacilityResults';
 import { AdminLogin } from './pages/AdminLogin';
 import { AdminDashboard } from './pages/AdminDashboard';
+import { DashboardLogin } from './pages/DashboardLogin';
 import './App.css';
 
 function formatLastUpdated(dataset: ReturnType<typeof useDataset>['dataset']): string {
@@ -20,6 +21,7 @@ function formatLastUpdated(dataset: ReturnType<typeof useDataset>['dataset']): s
 
 function PublicTopBar() {
   const { dataset } = useDataset();
+  const { session, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -40,11 +42,39 @@ function PublicTopBar() {
           Facility Results
         </button>
       </nav>
+      <div className="topbar__session">
+        {session && <span className="text-muted">{session.user.email}</span>}
+        <button type="button" className="button" onClick={() => signOut()}>
+          Sign Out
+        </button>
+      </div>
     </header>
   );
 }
 
 function PublicShell() {
+  const { loading, session } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="app-shell">
+        <main className="app-main">
+          <div className="page">Loading…</div>
+        </main>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return (
+      <div className="app-shell">
+        <main className="app-main">
+          <DashboardLogin />
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="app-shell">
       <PublicTopBar />

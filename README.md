@@ -9,26 +9,32 @@ final outcome?**
 ## Architecture
 
 ```
-Admin (authenticated) ──upload──▶ Supabase Postgres ──realtime──▶ Read-only dashboard
-                                   (RLS enforces writes            (public, no login,
-                                    require an admin session)       select-only)
+Admin (authenticated,      ──upload──▶ Supabase Postgres ──realtime──▶ Viewer (authenticated,
+ must be in admin_users)                (RLS: reads need a               any signed-in user)
+                                         session; writes need
+                                         admin_users membership)
 ```
 
 There is **one shared database** (Supabase Postgres) and no local/browser
-storage of auction data. Read access is public (no login required — anyone
-with the link can view); write access requires an authenticated admin
-session, and that restriction is enforced by the database itself via **Row
-Level Security** (`supabase/migrations/0001_init.sql`), not just by hiding the
-upload button in the UI. A read-only user cannot write data even by calling
-the Supabase REST API directly with the browser's network tools — the anon
-key they'd use has no write grant under RLS.
+storage of auction data. **Every route requires a signed-in Supabase Auth
+session** — there is no public/anonymous read access. Write access
+additionally requires the signed-in user to be listed in `admin_users`. Both
+restrictions are enforced by the database itself via **Row Level Security**
+(`supabase/migrations/0001_init.sql`), not just by the frontend's routing —
+a signed-in read-only user cannot write data even by calling the Supabase
+REST API directly with the browser's network tools, and a request with no
+session at all cannot read anything.
 
-- **`/`** and **`/facility`** — the public, read-only dashboard (Overview,
-  Facility Results, auction detail). No upload control exists on these
-  routes at all.
-- **`/admin`** — sign-in required. Once signed in, only users listed in the
-  database's `admin_users` table see the upload/system-status screen;
-  anyone else sees "Not Authorized."
+- **`/`** and **`/facility`** — the read-only dashboard (Overview, Facility
+  Results, auction detail). Any authenticated user can view/search/filter;
+  visiting either route while signed out shows a sign-in screen instead of
+  the dashboard. No upload control exists on these routes at all.
+- **`/admin`** — sign-in required, same as above. Once signed in, only users
+  listed in the database's `admin_users` table see the upload/system-status
+  screen; any other authenticated user sees "Not Authorized."
+- **No self-serve sign-up anywhere.** Every account — viewer or admin — is
+  created manually in the Supabase dashboard (Authentication → Users). See
+  "One-time setup" below.
 
 ## What it does
 
@@ -74,10 +80,16 @@ once:
    insert into public.admin_users (user_id) values ('00000000-0000-0000-0000-000000000000');
    ```
    Repeat step 3–4 for any other person who should be able to upload.
-5. **Get your API credentials.** Project Settings → API → copy the Project
+5. **Create viewer accounts** for everyone else who needs to see the
+   dashboard (SMs, Ops Managers, Auctions team, leadership) the same way as
+   step 3 — Authentication → Users → Add user — but **skip step 4** for
+   them; being a valid Supabase Auth user is all that's needed to read the
+   dashboard, `admin_users` membership is only what gates writes. There is no
+   sign-up form in the app itself, by design — every account is created here.
+6. **Get your API credentials.** Project Settings → API → copy the Project
    URL and the `anon` `public` key (**not** the `service_role` key — that one
    must never go in the frontend).
-6. **Configure the app.** Copy `.env.example` to `.env.local` and fill in:
+7. **Configure the app.** Copy `.env.example` to `.env.local` and fill in:
    ```
    VITE_SUPABASE_URL=https://<your-project>.supabase.co
    VITE_SUPABASE_ANON_KEY=<your anon key>
@@ -143,25 +155,32 @@ dropped.
 
 ## Security model
 
-- **Read access:** public. The dashboard at `/` and `/facility` needs no
-  login — RLS grants `select` on `auction_records` and `uploads` to
-  everyone, which is what lets the whole team (SMs, Ops, Auctions,
-  leadership) view results without individual accounts.
+- **Read access:** requires a signed-in Supabase Auth session, nothing more.
+  RLS grants `select` on `auction_records` and `uploads` only `to
+  authenticated` (the `anon` role has no policy and no table grant on either
+  table), so an unauthenticated request — whether from the app before
+  sign-in or a direct API call with no session — gets rejected, not just an
+  empty result. Any signed-in user, viewer or admin, can read.
 - **Write access:** only rows in `admin_users`. RLS grants `insert`/`update`
   on `auction_records` and `insert` on `uploads` only when
   `public.is_admin()` (a `SECURITY DEFINER` function checking the caller's
   `auth.uid()` against `admin_users`) returns true. This is checked by
-  Postgres itself on every write — it holds even if a read-only user
-  inspects network requests and tries to replay/modify one directly against
-  the Supabase REST API.
+  Postgres itself on every write — it holds even if a signed-in read-only
+  user inspects network requests and tries to replay/modify one directly
+  against the Supabase REST API.
 - **`admin_users` itself** has RLS enabled with **no policies at all**, so it
   is not readable or writable from the client under any circumstances (anon
   or authenticated) — only from the Supabase SQL Editor/dashboard using your
   own account, which uses a privileged connection that bypasses RLS.
-- **The Admin route (`/admin`)** is gated in the UI by Supabase Auth session
-  state, but that's a convenience, not the security boundary — the boundary
-  is the RLS policy above, so a stale or forged frontend session can't be
-  used to write data either.
+- **Both `/` + `/facility` (viewer) and `/admin` (admin) are gated in the UI**
+  by Supabase Auth session state (and, for `/admin`, an `is_admin()` RPC
+  check) — that's what shows the right sign-in screen and keeps read-only
+  users out of the upload UI. It's a convenience, not the security boundary:
+  the boundary is the RLS policies above, so a stale or forged frontend
+  session can't be used to read without an account or write without admin
+  rights either.
+- **No self-serve sign-up.** The app has no registration form; accounts
+  (viewer or admin) are created only from the Supabase dashboard.
 - The anon key shipped in the frontend bundle is meant to be public — that's
   how Supabase's model works. Never put the `service_role` key in this app
   or any frontend code.
