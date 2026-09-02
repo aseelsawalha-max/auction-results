@@ -3,10 +3,10 @@
 -- Run this once in the Supabase project's SQL editor (or via `supabase db push`
 -- if you use the Supabase CLI). It creates the tables that back the dashboard,
 -- and enforces read/write separation at the database level via Row Level
--- Security: EVERY row is publicly readable (so the read-only dashboard works
--- for anyone with the link), but writes are only allowed for users listed in
--- `admin_users`. This holds even if someone bypasses the frontend and calls
--- the Supabase REST API directly with the public anon key.
+-- Security: rows are only readable by signed-in (authenticated) users — the
+-- anon role has no read access at all — and writes are only allowed for
+-- users listed in `admin_users`. This holds even if someone bypasses the
+-- frontend and calls the Supabase REST API directly.
 
 -- ---------------------------------------------------------------------------
 -- Tables
@@ -107,11 +107,16 @@ alter table public.admin_users enable row level security;
 -- client entirely. Manage it from the Supabase SQL editor (or dashboard),
 -- using the service role, never from the app.
 
+-- Read access requires a signed-in session — anon has no policy on this
+-- table at all, so unauthenticated requests return zero rows.
 drop policy if exists "auction_records_public_read" on public.auction_records;
-create policy "auction_records_public_read"
+drop policy if exists "auction_records_authenticated_read" on public.auction_records;
+create policy "auction_records_authenticated_read"
   on public.auction_records for select
-  to anon, authenticated
+  to authenticated
   using (true);
+revoke select on public.auction_records from anon;
+grant select on public.auction_records to authenticated;
 
 drop policy if exists "auction_records_admin_write" on public.auction_records;
 create policy "auction_records_admin_write"
@@ -132,11 +137,15 @@ create policy "auction_records_admin_delete"
   to authenticated
   using (public.is_admin());
 
+-- Same rule for uploads: signed-in users only, no anon access.
 drop policy if exists "uploads_public_read" on public.uploads;
-create policy "uploads_public_read"
+drop policy if exists "uploads_authenticated_read" on public.uploads;
+create policy "uploads_authenticated_read"
   on public.uploads for select
-  to anon, authenticated
+  to authenticated
   using (true);
+revoke select on public.uploads from anon;
+grant select on public.uploads to authenticated;
 
 drop policy if exists "uploads_admin_write" on public.uploads;
 create policy "uploads_admin_write"
