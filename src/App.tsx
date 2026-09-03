@@ -6,6 +6,7 @@ import { FacilityResults } from './pages/FacilityResults';
 import { AdminLogin } from './pages/AdminLogin';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { DashboardLogin } from './pages/DashboardLogin';
+import { CreatePasswordForm } from './components/CreatePasswordForm';
 import './App.css';
 
 function formatLastUpdated(dataset: ReturnType<typeof useDataset>['dataset']): string {
@@ -125,27 +126,66 @@ function AdminShell() {
   );
 }
 
+function BrandShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="app-shell">
+      <header className="topbar">
+        <div className="topbar__brand">
+          <span className="topbar__title">Auction Results Dashboard</span>
+        </div>
+      </header>
+      <main className="app-main">{children}</main>
+    </div>
+  );
+}
+
 function AppShell() {
-  const { configured } = useAuth();
+  const { configured, loading, needsPasswordSetup, linkInvalid } = useAuth();
 
   if (!configured) {
     return (
-      <div className="app-shell">
-        <header className="topbar">
-          <div className="topbar__brand">
-            <span className="topbar__title">Auction Results Dashboard</span>
+      <BrandShell>
+        <div className="page">
+          <h1>Setup Required</h1>
+          <div className="banner banner--error">
+            Supabase is not configured for this deployment. Set <code>VITE_SUPABASE_URL</code>{' '}
+            and <code>VITE_SUPABASE_ANON_KEY</code> and reload — see README.md for exact steps.
           </div>
-        </header>
-        <main className="app-main">
-          <div className="page">
-            <h1>Setup Required</h1>
-            <div className="banner banner--error">
-              Supabase is not configured for this deployment. Set <code>VITE_SUPABASE_URL</code>{' '}
-              and <code>VITE_SUPABASE_ANON_KEY</code> and reload — see README.md for exact steps.
-            </div>
+        </div>
+      </BrandShell>
+    );
+  }
+
+  if (loading) {
+    return (
+      <BrandShell>
+        <div className="page">Loading…</div>
+      </BrandShell>
+    );
+  }
+
+  // Gate ahead of the normal routes: an invited user must set a password
+  // before reaching the read-only dashboard or the admin area, regardless
+  // of which URL the invite/redirect landed them on.
+  if (needsPasswordSetup) {
+    return (
+      <BrandShell>
+        <CreatePasswordForm />
+      </BrandShell>
+    );
+  }
+
+  if (linkInvalid) {
+    return (
+      <BrandShell>
+        <div className="page">
+          <h1>Link Expired</h1>
+          <div className="banner banner--error">
+            This invitation or password reset link is invalid or has already been used. Ask an
+            administrator to send a new invitation.
           </div>
-        </main>
-      </div>
+        </div>
+      </BrandShell>
     );
   }
 
