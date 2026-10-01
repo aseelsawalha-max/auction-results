@@ -1,5 +1,7 @@
 import * as XLSX from 'xlsx';
 import { detectColumns } from './columnMapping';
+import { excelCellDateToISO } from './normalize';
+import { EXPORT_CLOCK, type ExportClock } from './exportClock';
 import type { CanonicalField } from './types';
 
 export interface ParsedRow {
@@ -14,9 +16,15 @@ export interface ParsedWorkbook {
   unmappedColumns: string[];
 }
 
-function cellToString(value: unknown): string {
+function cellToString(value: unknown, clock: ExportClock): string {
   if (value === null || value === undefined) return '';
-  if (value instanceof Date) return value.toISOString();
+  // Not `value.toISOString()`: SheetJS builds this Date from the cell's
+  // wall-clock value in the *browser's local* timezone, so a plain
+  // toISOString() would differ between uploaders in different timezones and
+  // (because this text feeds the auction's identity) duplicate records. The
+  // cell's wall-clock is in LockerFox's export clock (see exportClock.ts),
+  // so convert from that.
+  if (value instanceof Date) return excelCellDateToISO(value, clock);
   if (typeof value === 'number') return String(value);
   return String(value).trim();
 }
@@ -26,7 +34,7 @@ function cellToString(value: unknown): string {
  * (i.e. contains a header row with at least Facility/Unit/Status-like columns).
  * Handles both legacy .xls (BIFF) and modern .xlsx (OOXML) exports transparently.
  */
-export async function parseExcelFile(file: File): Promise<ParsedWorkbook> {
+export async function parseExcelFile(file: File, clock: ExportClock = EXPORT_CLOCK): Promise<ParsedWorkbook> {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
 
@@ -41,13 +49,13 @@ export async function parseExcelFile(file: File): Promise<ParsedWorkbook> {
     const grid: unknown[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
     if (grid.length === 0) continue;
 
-    const headerRowIndex = findHeaderRowIndex(grid);
+    const headerRowIndex = findHeaderRowIndex(grid, clock);
     if (headerRowIndex === null) continue;
 
     const headerRowRaw = grid[headerRowIndex];
     const headers: string[] = [];
     headerRowRaw.forEach((cell) => {
-      const text = cellToString(cell);
+      const text = cellToString(cell, clock);
       if (text) headers.push(text);
     });
     if (headers.length === 0) continue;
@@ -61,7 +69,7 @@ export async function parseExcelFile(file: File): Promise<ParsedWorkbook> {
       const values: Record<string, string> = {};
       let hasAny = false;
       headers.forEach((header, idx) => {
-        const text = cellToString(rowRaw[idx]);
+        const text = cellToString(rowRaw[idx], clock);
         values[header] = text;
         if (text) hasAny = true;
       });
@@ -90,7 +98,7 @@ export async function parseExcelFile(file: File): Promise<ParsedWorkbook> {
 }
 
 /** Scans the first 10 rows for the one most likely to be a header row. */
-function findHeaderRowIndex(grid: unknown[][]): number | null {
+function findHeaderRowIndex(grid: unknown[][], clock: ExportClock): number | null {
   const maxScan = Math.min(10, grid.length);
   let bestRow: number | null = null;
   let bestScore = 0;
@@ -98,7 +106,7 @@ function findHeaderRowIndex(grid: unknown[][]): number | null {
   for (let r = 0; r < maxScan; r++) {
     const headers: string[] = [];
     (grid[r] ?? []).forEach((cell) => {
-      const text = cellToString(cell);
+      const text = cellToString(cell, clock);
       if (text) headers.push(text);
     });
     if (headers.length < 2) continue;

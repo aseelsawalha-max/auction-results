@@ -93,9 +93,31 @@ once:
    ```
    VITE_SUPABASE_URL=https://<your-project>.supabase.co
    VITE_SUPABASE_ANON_KEY=<your anon key>
+   VITE_LOCKERFOX_EXPORT_UTC_OFFSET=-07:00
    ```
-   Set the same two variables in your hosting provider's environment
-   variables when you deploy (see Deployment below).
+   Set the same variables in your hosting provider's environment variables
+   when you deploy (see Deployment below).
+
+   `VITE_LOCKERFOX_EXPORT_UTC_OFFSET` says how to read the wall-clock
+   "Auction Close" cells in LockerFox exports, which are **not UTC**. The app
+   converts them to real UTC instants with it, so the stored close time is the
+   same no matter which browser timezone an admin uploads from (uploads from
+   differently-zoned browsers once produced duplicate records). The value is
+   evidence, not a guess: on 2026-09-23 the cell for Unit 238 at 2553
+   Atlantic read `07:02` while LockerFox's Auction Report showed that auction
+   ending "10:02 AM EDT" (14:02 UTC), i.e. an offset of `-07:00`. LockerFox
+   exposes no timezone setting, and a September observation cannot tell a
+   fixed offset from a DST-following zone, so the setting deliberately
+   assumes no DST rule.
+
+   **Re-verify in the first week after 1 November 2026** (US daylight saving
+   ends): pick one auction in a fresh export, compare its cell to the time in
+   LockerFox's Auction Report, and compute the offset. If it is still 7 hours,
+   leave the setting. If it is now 8 hours, the export follows DST — set the
+   variable to the IANA zone name (e.g. `America/Los_Angeles`), which the app
+   also accepts. The configured value is shown on the Admin page. Changing it
+   cannot duplicate records (record identity is independent of it); it only
+   corrects stored close times once, on the next upload.
 
 Without these, the app shows a "Setup Required" screen instead of the
 dashboard — there is intentionally no local-storage fallback.

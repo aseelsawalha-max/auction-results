@@ -1,22 +1,93 @@
 import type { AuctionRecord, Dataset, UploadResult, UploadWarning, CanonicalField } from './types';
 import type { ParsedRow } from './parseExcel';
-import { parseDateFlexible, parseNumberFlexible, normalizeKeyPart } from './normalize';
+import { parseDateFlexible, parseNumberFlexible, normalizeKeyPart, auctionCloseDayKey } from './normalize';
 
 const KNOWN_STATUSES = new Set(['SOLD', 'PICKED-UP', 'PICKED UP', 'UNSOLD', 'VOID', 'VOIDED', 'CANCELED', 'CANCELLED']);
 
-function buildDedupeKey(
+/**
+ * Two records for the same facility+unit whose close instants are closer
+ * together than this are treated as the same auction represented two ways.
+ * The assumption behind it: a storage lien auction runs for days, so a unit
+ * cannot genuinely close twice within 24 hours — a relisted unit closes days
+ * later. Representation shifts, on the other hand, are at most a timezone
+ * offset apart (≤14h; across midnight for evening closes): the old
+ * browser-timezone-dependent key, or a later correction of the export clock
+ * (exportClock.ts). This window is only consulted when the exact identity
+ * lookup misses, and never on the strength of facility+unit alone — see the
+ * conditions where it is applied.
+ */
+const NEAR_DUPLICATE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** A composite key in the current (day-granularity) format. */
+const CANONICAL_COMPOSITE_KEY_RE = /^composite:.*\|\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The stable identity of a LockerFox auction, independent of how any one
+ * upload happened to represent its close time.
+ *
+ * Real LockerFox exports carry no auction ID (verified against an actual
+ * export: Auction Close, Facility, Unit, Status, Attendees, Views, Bid, Void
+ * Reason Code, Cancel Reason Code), so identity is normally the composite of
+ * facility, unit and the close *calendar day* (the UTC day of the stored
+ * close instant). Day granularity is deliberate: earlier versions keyed on
+ * the full close timestamp text, and because that text was derived in the
+ * uploader's local timezone (see excelCellDateToISO), the same auction
+ * uploaded from two browsers in different timezones produced two keys and two
+ * records. A unit cannot close twice in one day, but a relisted unit closes
+ * on a later day and is correctly a separate auction.
+ *
+ * A native auction ID is still preferred whenever an export does include one.
+ */
+function auctionIdentity(
   auctionId: string | undefined,
   facility: string | undefined,
   unit: string | undefined,
   auctionCloseRaw: string | undefined,
-): { key: string; isNativeId: boolean } {
+): { identity: string; isNativeId: boolean } {
   if (auctionId && auctionId.trim()) {
-    return { key: `id:${normalizeKeyPart(auctionId)}`, isNativeId: true };
+    return { identity: `id:${normalizeKeyPart(auctionId)}`, isNativeId: true };
   }
-  return {
-    key: `composite:${normalizeKeyPart(facility)}|${normalizeKeyPart(unit)}|${normalizeKeyPart(auctionCloseRaw)}`,
-    isNativeId: false,
-  };
+  // An unparseable close value keeps the old behaviour (keyed by its text) so
+  // such records are neither merged with each other nor orphaned.
+  const day = auctionCloseDayKey(auctionCloseRaw) ?? normalizeKeyPart(auctionCloseRaw);
+  return { identity: `composite:${normalizeKeyPart(facility)}|${normalizeKeyPart(unit)}|${day}`, isNativeId: false };
+}
+
+function facilityUnitKey(facility: string | undefined, unit: string | undefined): string {
+  return `${normalizeKeyPart(facility)}|${normalizeKeyPart(unit)}`;
+}
+
+function closeInstant(record: Pick<AuctionRecord, 'auctionCloseRaw' | 'auctionClose'>): number | undefined {
+  const iso = record.auctionCloseRaw ? parseDateFlexible(record.auctionCloseRaw) : record.auctionClose;
+  if (!iso) return undefined;
+  const t = Date.parse(iso);
+  return isNaN(t) ? undefined : t;
+}
+
+/**
+ * When the database already holds more than one record for the same identity
+ * (the duplicates created by the old key), choose which one new uploads keep
+ * updating.
+ *
+ * First preference is the copy whose stored close instant is *later*: the
+ * duplicate pairs were produced by one upload environment in the export's own
+ * timezone (correct instant) and one in UTC (instant too early by the
+ * export zone's offset — e.g. 07:02Z instead of the 14:02Z that LockerFox's
+ * Auction Report confirms for "10:02 AM EDT"). Then the copy LockerFox has
+ * most recently confirmed, then the most recently changed, then the one
+ * already on the current key format, then a fixed tie-break so the choice is
+ * deterministic across uploads.
+ */
+function preferRecord(a: AuctionRecord, b: AuctionRecord): boolean {
+  const aInstant = closeInstant(a);
+  const bInstant = closeInstant(b);
+  if (aInstant !== undefined && bInstant !== undefined && aInstant !== bInstant) return aInstant > bInstant;
+  if (a.lastSeenAt !== b.lastSeenAt) return a.lastSeenAt > b.lastSeenAt;
+  if (a.lastUpdatedAt !== b.lastUpdatedAt) return a.lastUpdatedAt > b.lastUpdatedAt;
+  const aCanonical = CANONICAL_COMPOSITE_KEY_RE.test(a.dedupeKey);
+  const bCanonical = CANONICAL_COMPOSITE_KEY_RE.test(b.dedupeKey);
+  if (aCanonical !== bCanonical) return aCanonical;
+  return a.dedupeKey < b.dedupeKey;
 }
 
 function fieldValue(row: ParsedRow, mapping: Partial<Record<CanonicalField, string>>, field: CanonicalField): string {
@@ -43,12 +114,38 @@ export function mergeUpload(
     });
   }
 
+  // Every stored record, by its database key. Matched records keep their
+  // existing key (even an old-format one) so the upsert updates that row
+  // rather than inserting a second one.
   const recordsByKey = new Map(dataset.records.map((r) => [r.dedupeKey, r] as const));
+
+  // Lookup indexes computed from each record's *fields*, not its stored key,
+  // so records keyed under the old full-timestamp format are still found.
+  const byIdentity = new Map<string, AuctionRecord>();
+  const preexistingDuplicateIdentities = new Set<string>();
+  // Candidates for the close-time proximity fallback: composite-keyed records
+  // with a facility, a unit and a parseable close instant.
+  const byFacilityUnit = new Map<string, AuctionRecord[]>();
+  for (const r of dataset.records) {
+    const { identity } = auctionIdentity(r.auctionId, r.facility, r.unit, r.auctionCloseRaw);
+    const prev = byIdentity.get(identity);
+    if (!prev) {
+      byIdentity.set(identity, r);
+    } else {
+      preexistingDuplicateIdentities.add(identity);
+      if (preferRecord(r, prev)) byIdentity.set(identity, r);
+    }
+    if (!r.dedupeKeyIsNativeId && r.facility && r.unit && closeInstant(r) !== undefined) {
+      const fu = facilityUnitKey(r.facility, r.unit);
+      byFacilityUnit.set(fu, [...(byFacilityUnit.get(fu) ?? []), r]);
+    }
+  }
 
   let recordsAdded = 0;
   let recordsUpdated = 0;
   let recordsUnchanged = 0;
   let rowsSkipped = 0;
+  let nearDuplicateMatches = 0;
   const seenStatuses = new Set<string>();
   const blankFacilityRows: number[] = [];
   const blankUnitRows: number[] = [];
@@ -72,11 +169,11 @@ export function mergeUpload(
       continue;
     }
 
-    const { key, isNativeId } = buildDedupeKey(auctionId, facility, unit, auctionCloseRaw);
+    const { identity, isNativeId } = auctionIdentity(auctionId, facility, unit, auctionCloseRaw);
 
-    const existingRowsForKey = rowKeysInThisFile.get(key) ?? [];
+    const existingRowsForKey = rowKeysInThisFile.get(identity) ?? [];
     existingRowsForKey.push(row.rowNumber);
-    rowKeysInThisFile.set(key, existingRowsForKey);
+    rowKeysInThisFile.set(identity, existingRowsForKey);
 
     const auctionClose = auctionCloseRaw ? parseDateFlexible(auctionCloseRaw) : undefined;
     if (auctionCloseRaw && !auctionClose) invalidDateRows.push(row.rowNumber);
@@ -114,11 +211,44 @@ export function mergeUpload(
       cancelReasonCode: cancelReasonCode || undefined,
     };
 
-    const existing = recordsByKey.get(key);
+    let existing = byIdentity.get(identity);
+
+    // Close-time proximity fallback. A stored record whose close instant was
+    // shifted across midnight — by the old browser-timezone-dependent key, or
+    // by a later correction of the export clock — has a different identity
+    // day. Find it by proximity, but only when ALL of these hold: the exact
+    // identity lookup missed; the row has no native auction ID; the row has
+    // both a facility and a unit; the row's close time parsed; and the
+    // candidate (same facility and unit, with its own parseable close time)
+    // closes within NEAR_DUPLICATE_WINDOW_MS. Facility and unit alone never
+    // match anything.
+    if (!existing && !isNativeId && facility && unit && auctionClose) {
+      const instant = Date.parse(auctionClose);
+      let best: AuctionRecord | undefined;
+      let bestDistance = NEAR_DUPLICATE_WINDOW_MS;
+      for (const candidate of byFacilityUnit.get(facilityUnitKey(facility, unit)) ?? []) {
+        const candidateInstant = closeInstant(candidate);
+        if (candidateInstant === undefined) continue;
+        const distance = Math.abs(candidateInstant - instant);
+        if (distance < bestDistance || (distance === bestDistance && best && preferRecord(candidate, best))) {
+          best = candidate;
+          bestDistance = distance;
+        }
+      }
+      if (best) {
+        existing = best;
+        nearDuplicateMatches++;
+        byIdentity.set(identity, best);
+      }
+    }
+
+    // Defensive: never let a brand-new record's key collide with a row that
+    // already exists under that exact key.
+    if (!existing) existing = recordsByKey.get(identity);
 
     if (!existing) {
       const record: AuctionRecord = {
-        dedupeKey: key,
+        dedupeKey: identity,
         dedupeKeyIsNativeId: isNativeId,
         ...candidateFields,
         extra,
@@ -136,7 +266,8 @@ export function mergeUpload(
           },
         ],
       };
-      recordsByKey.set(key, record);
+      recordsByKey.set(identity, record);
+      byIdentity.set(identity, record);
       recordsAdded++;
     } else {
       const changedFields: { field: string; from: string | undefined; to: string | undefined }[] = [];
@@ -217,6 +348,18 @@ export function mergeUpload(
   }
   if (unmappedColumns.length > 0) {
     warnings.push({ severity: 'warning', message: `${unmappedColumns.length} column(s) not recognized as standard LockerFox fields; preserved as additional details: ${unmappedColumns.join(', ')}.` });
+  }
+  if (preexistingDuplicateIdentities.size > 0) {
+    warnings.push({
+      severity: 'warning',
+      message: `${preexistingDuplicateIdentities.size} auction(s) already have more than one stored record for the same facility, unit and close date (left over from the earlier timezone-dependent key). The most recently seen copy of each was kept up to date; the extra copies were left untouched and should be merged with the one-time cleanup.`,
+    });
+  }
+  if (nearDuplicateMatches > 0) {
+    warnings.push({
+      severity: 'warning',
+      message: `${nearDuplicateMatches} row(s) matched an existing record for the same facility and unit whose stored close time differs by less than 24 hours (the same auction with a timezone-shifted close time); that record was updated instead of creating a duplicate.`,
+    });
   }
 
   const newDataset: Dataset = {

@@ -1,6 +1,7 @@
 import { useDataset } from '../hooks/useDataset';
 import { useAuth } from '../hooks/useAuth';
 import { UploadPanel } from '../components/UploadPanel';
+import { EXPORT_CLOCK } from '../lib/exportClock';
 
 function formatDateTime(iso: string | undefined): string {
   if (!iso) return 'Never';
@@ -47,7 +48,17 @@ export function AdminDashboard() {
           <div className="status-summary__label">Total Historical Records</div>
           <div className="status-summary__value">{dataset.records.length}</div>
         </div>
+        <div className="status-summary__item">
+          <div className="status-summary__label">Export close times read as</div>
+          <div className="status-summary__value">{EXPORT_CLOCK.label}</div>
+        </div>
       </div>
+      <p className="text-muted">
+        LockerFox export cells hold wall-clock times, not UTC. The offset above was verified on
+        2026-09-23 against LockerFox's Auction Report (Unit 238, 2553 Atlantic: cell 07:02 =
+        10:02 AM EDT) and must be re-verified after US daylight saving ends on 1 November 2026 —
+        see README. Changing it cannot duplicate records; it only corrects stored close times.
+      </p>
 
       <h2>Upload the Latest LockerFox Export</h2>
       <UploadPanel />

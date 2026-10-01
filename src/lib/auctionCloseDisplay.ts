@@ -4,14 +4,13 @@
  * filtering.
  *
  * Deliberately independent from normalize.ts's parseDateFlexible(), which
- * merge.ts uses to derive AuctionRecord.auctionClose and must not change
- * (that logic — and the repeated-upload fix in commit b274218 that depends
- * on it — anchors naive date/time text to the *parsing environment's* local
- * timezone before converting to an ISO string for storage). This module is
- * presentation-only: it always anchors naive date/time components as UTC
- * (matching how SheetJS already represents genuine Excel date cells), and
- * always *formats* using UTC components, so every viewer sees the exact same
- * LockerFox date/time regardless of their own browser's timezone.
+ * merge.ts uses to derive AuctionRecord.auctionClose. Both now anchor naive
+ * (timezone-less) date/time components as UTC — parseDateFlexible() so the
+ * stored value is the same no matter which browser uploaded the file, and
+ * this module so every viewer *sees* the same value — but this module is
+ * presentation-only and also *formats* using UTC components, so the
+ * LockerFox date/time renders identically regardless of the viewer's own
+ * browser timezone.
  *
  * auctionCloseRaw (a plain text column, never reinterpreted by Postgres) is
  * preferred over the derived auctionClose for display: Supabase's
